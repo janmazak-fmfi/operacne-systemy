@@ -88,7 +88,7 @@ Detailnejšia dokumentácia:
 
 #### Condition variable
 
-Umožňuje vláknam čakať na splnenie podmienky v kritickej sekcii. Základné operácie sú `wait`/`await` a `signal`. Typický scenár použitia je nasledovný: 
+Umožňuje vláknam čakať na splnenie podmienky v kritickej sekcii. Základné operácie sú `wait`/`await` a `signal`. Typický scenár použitia je nasledovný:
 
 Vlákno, ktoré vnútri kritickej sekcie čaká na splnenie nejakej podmienky, môže zaspať na condition variable. **Pri zaspaní vnútri kritickej sekcie sa zároveň uvoľní mutex**, ktorý pre ňu toto vlákno držalo (**dávajte preto veľký pozor na poradie priradení pre zdieľané premenné**). Vďaka tomuto môže nejaké iné vlákno vstúpiť do tej istej kritickej sekcie a vykonať nejaké zmeny. Zároveň, ak je šanca, že bola zmenená podmienka, pre ktorú prvé vlákno zaspalo, môže mu poslať `signal`/`wake`. Po zobudení začne vlákno čakať na získanie mutexu, overí, či bola splnená podmienka, na ktorú čakalo -- v prípade kladnej odpovede pokračuje vo vykonávaní, ináč opäť zaspí.
 
@@ -111,7 +111,10 @@ Viac informácií sa opäť dá nájsť napríklad na
 * http://linux.die.net/man/3/pthread_cond_wait
 * http://linux.die.net/man/3/pthread_cond_signa
 
-V oboch prípadoch je dôležité uvedomiť si, že spánok vlákna môže byť zobudený nielen signálom z iného vlákna, ale aj operačným systémom z iných dôvodov (ide najmä o prípade, keď na jednom mutexe čaká viac ako jedno vlákno). Preto treba vždy po zobudení skontrolovať, či bola potrebná podmienka skutočne splnená.
-
 Aj keď je povolené zavolať `pthread_cond_signal()` mimo časti kódu so zamknutým mutexom, [v niektorých prípadoch je to nevhodné](https://stackoverflow.com/questions/4544234/calling-pthread-cond-signal-without-locking-mutex#:~:text=The%20pthread_cond_signal()%20routine%20is,pthread_cond_wait()%20routine%20to%20complete.).
+
+#### Spurious wakeups
+
+Pri práci s vláknami je ľahké prehliadnuť niektoré ich interakcie. Dajte si pozor, aby ste správne ošetrili tzv. [spurious wakeup](https://stackoverflow.com/questions/8594591/why-does-pthread-cond-wait-have-spurious-wakeups/8594964#8594964).
+Spánok vlákna môže byť prerušený nielen signálom z iného vlákna, ale (v závislosti od implementácie) aj operačným systémom z iných dôvodov (ide najmä o prípady, keď na jednom mutexe čaká viac ako jedno vlákno). Preto treba vždy po zobudení skontrolovať, či bola potrebná podmienka skutočne splnená.
 

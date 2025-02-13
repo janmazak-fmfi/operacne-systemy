@@ -132,8 +132,7 @@ zložitejším a padajúcim.
 
 Ukážkové riešenie túto podmienku spĺňa "až príliš", preto budem zároveň
 požadovať, aby s rastúcou pamäťou mohol rásť aj počet alokovaných oblastí v
-pamäti, a tiež celková veľkosť pamäte, ktorú je možné alokovať. Inými slovami,
-mali by ste s pamäťou pracovať aspoň trocha efektívne.
+pamäti. Veľkosť pamäte, ktorú je možné alokovať (súčet cez všetky alokované bloky), musí byť aspoň 30% celkovej pamäte (ak je celková pamäť aspoň 10 kB). Inými slovami, mali by ste s pamäťou pracovať aspoň trocha efektívne.
 Myslite tiež na to, že alokácia pamäte musí byť rýchla (jednotlivé volania funkcií alokatora by nemali trvať viac než pár milisekúnd), hoci optimalizovať rýchlosť `alloc`/`free` nie je hlavným cieľom správy pamäte, najmä nie v tejto domácej úlohe.
 
 Činnosťou alokátora nesmie dochádzať k postupnému úbytku pamäte alokovateľnej užívateľmi (vaše pomocné štruktúry by v pamäti nemali narastať, pri uvoľnovaní treba dbať na ich zmenšovanie --- ak niekoľkokrát po sebe užívateľ žiada prideliť tú istú postupnosť blokov pamäti, malo by sa to podariť vždy, ak sa to podarilo prvýkrát).
@@ -145,7 +144,6 @@ Zároveň prichádza challenge: približne 5 algoritmov, ktoré budú vedieť pa
 
 Programy sa odovzdávajú e-mailom na adresu `jan.mazak@fmph.uniba.sk`, predmet `OS-DU2`, súbor `alloc.c` priložte k e-mailu. Odovzdať je možné viackrát (najviac raz denne).
 
-Najneskorší možný termín odovzdania je **24. 4. 2024**. Nepodceňujte čas potrebný na túto DU, za hodinku-dve to s vysokou pravdepodobnosťou nenapíšete, najmä ak cielite na efektívnejšie riešenie, ktoré má šancu získať bonus.
+Najneskorší možný termín odovzdania je **25. 4. 2025**. Nepodceňujte čas potrebný na túto DU, za hodinku-dve to s vysokou pravdepodobnosťou nenapíšete, najmä ak cielite na efektívnejšie riešenie, ktoré má šancu získať bonus.
 
 Oficiálny výstup z testovača bude zverejnený po odovzdaní všetkých domácich úloh (a občas aj priebežne) na http://dcs.fmph.uniba.sk/~mazak/vyucba/os/results2.html.
-

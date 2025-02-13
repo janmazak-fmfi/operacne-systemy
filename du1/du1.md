@@ -7,9 +7,9 @@ Vašou úlohou je naprogramovať síce zjednodušenú, ale viacvláknovú verziu
 
 Odovzdaný program musí používať multithreading s aspoň 2 vláknami (môže ich byť viac) --- minimálne jedno vlákno obsluhuje načítavanie zo vstupu a druhé výpis na štandardný výstup. Tieto vlákna si nejakým spôsobom koordinovane a _efektívne_ (bez plytvania systémovými prostriedkami) odovzdávajú dáta. Akékoľvek formy [činného čakania (busy waiting)](https://josephmate.github.io/2016-02-04-how-to-avoid-busy-waiting/) sú vylúčené, nemali by ste ani použiť funkcie ako `sleep`.
 
-Všetky dáta, ktoré prišli na štandardný vstup programu, sa musia v (primeranom) konečnom čase a nezmenené dostať na štandardný výstup.
+Všetky dáta, ktoré prišli na štandardný vstup programu, sa musia v (primeranom) konečnom čase a nezmenené dostať na štandardný výstup. Množstvo pamäti, ktoré váš program použije, musí byť zhora ohraničené konštantou (nesmie rásť do nekonečna s veľkosťou vstupu --- musíte sa vyhnúť situácii, že najprv prečítate celý vstup a potom ho zapíšete na výstup).
 
-Vlastný program má byť napísaný v jazyku C a používať iba [štandardnú knižnicu jazyka C](https://en.wikipedia.org/wiki/C_standard_library) a a [knižnicu na synchronizovanie vlákien _pthread_](pthread.md). Vyhýbajte sa veciam mimo štandardu POSIX a neprenositeľným doplnkom, ktoré vaša konkrétna implementácia možno ponúka.
+Vlastný program má byť napísaný v jazyku C a používať iba [štandardnú knižnicu jazyka C](https://en.wikipedia.org/wiki/C_standard_library) a [knižnicu na synchronizovanie vlákien _pthread_](pthread.md). Vyhýbajte sa veciam mimo štandardu POSIX a neprenositeľným doplnkom, ktoré vaša konkrétna implementácia možno ponúka.
 
 Na synchronizáciu vlákien použite `pthread_mutex_lock`, `pthread_mutex_unlock`, `pthread_cond_wait`, `pthread_cond_signal`. Nie je povolené použiť mechanizmy, ktoré to vybavia za vás (napr. `pipe`). Úloha sa dá riešiť s malým počtom mutexov a podmienok (`pthread_cond_t`), premyslite si preto ešte pred písaním samotného programu, či ich nejdete použiť zbytočne veľa (jednoduchší program sa ľahšie ladí).
 
@@ -49,7 +49,7 @@ Testovač nie je úplne spoľahlivý: môže sa stať, že nedokáže váš prog
 
 ### Odovzdávanie a hodnotenie
 
-Programy sa odovzdávajú e-mailom na adresu `jan.mazak@fmph.uniba.sk`, predmet `OS-DU1`, v súbore `<priezvisko>.c` (kde `<priezvisko>` je vaše priezvisko) ako príloha k e-mailu. Odovzdať je možné viackrát (najviac raz denne). Najneskorší možný termín odovzdania je **7. 4. 2024**.
+Programy sa odovzdávajú e-mailom na adresu `jan.mazak@fmph.uniba.sk`, predmet `OS-DU1`, v súbore `<priezvisko>.c` (kde `<priezvisko>` je vaše priezvisko) ako príloha k e-mailu. Odovzdať je možné viackrát (najviac raz denne). Najneskorší možný termín odovzdania je **7. 4. 2025**.
 
 Plný počet bodov dostane program, ktorý za každých podmienok zvládne splniť zadanie úlohy; 0 bodov program, ktorý sa nepodarí donútiť, aby aspoň v nejakom prípade dostatočne spĺňal zadanie. Body medzi sa škálujú podľa rozsahu (ne-)funkčnosti.
 
