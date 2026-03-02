@@ -5,337 +5,382 @@ import resource
 import datetime
 import threading
 import tempfile
-import fcntl
 from html import escape
 import sys
 import os
+from enum import Enum
+import traceback
 
 SUBMITS = os.getcwd() + "/submits/"
 COMMON = os.getcwd() + "/common/"
 
-TIMEOUT = 1
-
 def colored(s,color):
-    if color == "red":
-        c="\033[0;31m"
-    elif color == "green":
-        c="\033[0;32m"
+	if color == "red":
+		c="\033[0;31m"
+	elif color == "green":
+		c="\033[0;32m"
 
-    return(c + s + "\033[00m")
+	return(c + s + "\033[00m")
+
+def hex2list(h):
+	return list(map(lambda x: int(x[0]+x[1], 16), list(zip(h[::2],h[1::2]))))
+
+def lsb2msb(i):
+	return i[6:8] + i[4:6] + i[2:4] + i[0:2]
+
+# command return value type for checking
+class CmdRetValue(Enum):
+	NONE = 0
+	OK_FAIL = 1
+	INT = 2
+	POINTER = 3
 
 class SubmitRun:
-    def __init__(self, args, logfile = None):
-        self.__args = args
-        self.msize = int(args[-1])
-        self.__cwd = tempfile.mkdtemp()
-        self.errors = []
-        self.logfile = logfile
+	def __init__(self, args):
+		self.__args = args
+		self.msize = int(args[-1])
+		self.__cwd = tempfile.mkdtemp()
+		self.reads = 0
+		self.writes = 0
 
-        self.start()
+		self.start()
 
-    def start(self):
-        self.__p = subprocess.Popen(self.__args, cwd = self.__cwd, bufsize=1, stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr = subprocess.PIPE, universal_newlines = True, preexec_fn  =
-            self.set_limits, close_fds=True)
+	def start(self):
+		self.__p = subprocess.Popen(self.__args, cwd = self.__cwd, bufsize=1, stdin=subprocess.PIPE,
+			stdout=subprocess.PIPE, stderr = subprocess.PIPE, universal_newlines = True, preexec_fn  =
+			self.set_limits, close_fds=True)
 
-# Make standard error output pollable
-        fd = self.__p.stderr.fileno()
-        fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-        fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-    def __del__(self):
-        try:
-            self.end()
-        except IOError:
-            pass
-        os.system("rm -rf " + self.__cwd)
+	def __del__(self):
+		try:
+			#self.end()
+			pass
+		except IOError:
+			pass
+		os.system("rm -rf " + self.__cwd)
 
-    def log(self, s):
-        if self.logfile is not None:
-            self.logfile.write(s + "\n")
-        #print(s)
-        pass
+	def log(self, s):
+		#print(s)
+		pass
 
-    def restart(self):
-        self.end()
-        self.start()
+	def restart(self):
+		self.end()
+		self.start()
 
-    def set_limits(self):
-        #resource.setrlimit(resource.RLIMIT_CPU, (180,180))
-        resource.setrlimit(resource.RLIMIT_CPU, (40,40))
-        pass
+	def set_limits(self):
+		#resource.setrlimit(resource.RLIMIT_CPU, (120,120))
+		resource.setrlimit(resource.RLIMIT_CPU, (40,40))
+		#resource.setrlimit(resource.RLIMIT_CPU, (120,120))
+		#resource.setrlimit(resource.RLIMIT_CPU, (16,16))
+		pass
 
-    def send(self, s):
-        self.__p.stdin.write(s)
-        self.__p.stdin.flush()
+	def send(self, s):
+		try:
+			self.__p.stdin.write(s)
+		except BrokenPipeError:
+			raise RuntimeError("Target terminated unexpectedly")
 
-    def recv(self):
-        #print("trying readline")
-        s = self.__p.stdout.readline()
-        #print("done readline")
+	def recv(self):
+		s = self.__p.stdout.readline()
+		return s
 
-# stderr is non-blocking; no data returned cause problems with encoding
-# conversion. For now catch it.
+	def cmd(self, cmd, cmdReturnValueCheckType: CmdRetValue, *args):
+		pout = cmd + " " + " ".join(map(str, args))
+		#print(pout)
+		self.send(pout + "\n")
 
-        try:
-            err = self.__p.stderr.read()
-            if err is not None:
-                self.errors.append(err)
-        except TypeError:
-            pass
-        return s
+		pin = self.recv()
+		self.log("%s: '%s'" % (pout,pin.strip()))
+		if (pin==''):
+			# Probably termination; try to wait
+			self.__p.wait()
+			if self.__p.returncode != None:
+				code = self.__p.returncode
+				if code == -9: raise RuntimeError("Timeout (command: %s)"%cmd)
+				elif code > 0 or code == -6:
+					err = self.__p.stderr.readlines()
+					if err != []:
+						raise RuntimeError(("Runtime error (command: %s):\n" % cmd) + "".join(err))
+					else:
+						raise RuntimeError("Runtime error (command: %s)" % cmd)
+				elif code == -11:
+					raise RuntimeError("Runtime error: segfault (command: %s)" % cmd)
+				else: raise RuntimeError("Terminated with exit code %d (command: %s) " % (self.__p.returncode, cmd))
+			else:
+				raise RuntimeError("Unknown (command: %s)" % cmd)
+		# Split results and r/w stats
+		#print(pin, end='')
 
-    def cmd(self, cmd, wait_reply = True, *args):
-        try:
-            pout = cmd + " " + " ".join(map(str,args))
-            self.send(pout + "\n")
+		(pin, stats) = pin.split("#")
+		pin = pin.strip()
+		items = pin.split(" ")
 
-            if not wait_reply:
-                self.log("%s" % (pout))
-                return None
+		# Decode reads/writes
+		(reads, writes) = map(int, stats.strip().split(" "))
+		self.reads += reads
+		self.writes += writes
+		if (len(items) == 1):
+			ret = (int(items[0], 0), )
+		else:
+			ret = (
+				int(items[0], 0),
+				items[1]
+			)
 
-            pin = self.recv()
-            self.log("%s: '%s'" % (pout,pin.strip()))
-            if (pin==''):
-                # Probably termination; try to wait
-                self.__p.wait(timeout=TIMEOUT)
-                if self.__p.returncode != None:
-                    code = self.__p.returncode
-                    if code == -9: raise RuntimeError("Timeout")
-                    elif code > 0 or code == -6:
-                        err = self.errors
-                        if err != []:
-                            raise RuntimeError("Runtime error:\n" + "".join(err))
-                        else:
-                            raise RuntimeError("Runtime error")
-                    elif code == -11:
-                        raise RuntimeError("Runtime error: segfault")
-                    else: raise RuntimeError("Terminated with exit code %d" % self.__p.returncode)
-                else:
-                    raise RuntimeError("Unknown")
+		value = ret[0]
+		if cmdReturnValueCheckType == CmdRetValue.OK_FAIL:
+			OK = 0
+			FAIL = -1
+			if (value != OK) and (value != FAIL):
+				raise RuntimeError("Invalid return value " + str(value))
+		elif cmdReturnValueCheckType == CmdRetValue.INT:
+			FAIL = -1
+			if (value < 0) and (value != FAIL):
+				raise RuntimeError("Invalid return value " + str(value))
+		elif cmdReturnValueCheckType == CmdRetValue.POINTER:
+			if value < 0:
+				raise RuntimeError("Invalid handle pointer value " + str(value))
+		else:
+			pass  # no return value to check
 
-            ret = int(pin)
-            return ret
-        except ValueError as e:
-            raise RuntimeError("Protocol error: " + str(e))
+		return ret
 
-    def end(self):
-        try:
-            self.cmd("end", False)
-        except IOError:
-            pass
-        self.__p.wait(timeout=TIMEOUT)
+	def end(self):
+		try:
+			self.cmd("end", CmdRetValue.NONE)
+		except (IOError, RuntimeError):
+			pass
+		self.__p.wait()
 
-    def alloc(self, size):
-        ret = self.cmd("alloc", True, size)
-        if ret < -1:
-            raise RuntimeError("alloc: Unknown return value %d" % ret)
-        return ret
+	# L1
+	def open(self, path): return self.cmd("open", CmdRetValue.POINTER, path)[0]
+	def creat(self, path): return self.cmd("creat", CmdRetValue.POINTER, path)[0]
+	def close(self, fd): return self.cmd("close", CmdRetValue.OK_FAIL, fd)[0]
+	def unlink(self, path): return self.cmd("unlink", CmdRetValue.OK_FAIL, path)[0]
+	def rename(self, oldpath, newpath): return self.cmd("rename", CmdRetValue.OK_FAIL, oldpath, newpath)[0]
 
-    def free(self, addr):
-        ret = self.cmd("free", True, addr)
-        if ret not in [-1, 0]:
-            raise RuntimeError("free: Unknown return value %d" % ret)
-        return ret
+	def read(self, fd, length):
+		ret = self.cmd("read", CmdRetValue.INT, fd, length)
+		if (len(ret) == 1):
+			ret = (ret[0], '')
 
-    def read(self, addr):
-        assert 0 <= addr < self.msize
-        return self.cmd("read", True, addr)
+		# Black magic to decode hex byte string to list of bytes
+		return (ret[0], list(map(lambda x: int(x[0]+x[1], 16),
+			list(zip(ret[1][::2],ret[1][1::2])))))
 
-    def write(self, addr, val):
-        assert 0 <= addr < self.msize
-        assert 0 <= val < 256
-        return self.cmd("write", True, addr, val)
+	def write(self, fd, data):
+		return self.cmd("write", CmdRetValue.INT, fd, "".join(map(lambda x: hex(x)[2:],data)), len(data))[0]
+	def seek(self, fd, pos): return self.cmd("seek", CmdRetValue.OK_FAIL, fd, pos)[0]
+	def tell(self, fd): return self.cmd("tell", CmdRetValue.INT, fd)[0]
+	def stat(self, fd):
+		ret = self.cmd("stat", CmdRetValue.OK_FAIL, fd)
+		if len(ret) == 1:
+			return ret[0]
+		assert len(ret[1]) == 24
+		rd = {
+			'st_size': int(lsb2msb(ret[1][0:8]), 16),
+			'st_nlink': int(lsb2msb(ret[1][8:16]), 16),
+			'st_type': int(lsb2msb(ret[1][16:24]) ,16),
+			}
+		return (ret[0],rd)
 
+	def mkdir(self, path): return self.cmd("mkdir", CmdRetValue.OK_FAIL, path)[0]
+	def rmdir(self, path): return self.cmd("rmdir", CmdRetValue.OK_FAIL, path)[0]
+	def opendir(self, path): return self.cmd("opendir", CmdRetValue.POINTER, path)[0]
+	def readdir(self, fd): return self.cmd("readdir", CmdRetValue.OK_FAIL, fd)
+	def closedir(self, fd): return self.cmd("closedir", CmdRetValue.OK_FAIL, fd)[0]
+
+	def link(self, oldpath, newpath): return self.cmd("link", CmdRetValue.OK_FAIL, oldpath, newpath)[0]
+	def symlink(self, path, sympath): return self.cmd("symlink", CmdRetValue.OK_FAIL, path, sympath)[0]
 
 def compile(source):
-    csource = source + "/alloc.c"
-    if os.access(csource, os.R_OK):
-        exit_code = os.system("cc -std=c99 -g %s -Icommon/c/ common/c/wrapper.c -o %s -lm" %
-            (csource, source + "/alloc"))
-    else:
-        print("Unknown source for " + source)
+	csource = source + "/filesystem.c"
+	jsource = source + "/Filesystem.java"
+	if os.access(csource, os.R_OK):
+		if source.find("sadovsky") != -1:
+			append = "-std=gnu99"
+		else: append=""
+		os.system("cc -std=gnu99 -O0 -g %s -Icommon/c/ common/c/wrapper.c common/c/util.c -o %s -lm %s" % (csource,
+			source + "/filesystem", append))
+	elif os.access(jsource, os.R_OK):
+		os.system("javac -cp "+source+":common/java %s" % (jsource))
+	else:
+		print("Unknown source for " + source)
 
-    assert exit_code == 0
+def run(source, args):
+	cbinary = source + "/filesystem"
+	jbinary = source + "/Filesystem.class"
+	if os.access(cbinary, os.R_OK):
+		# Got binary
+		run_args = [cbinary, "disk.img" ]
+	elif os.access(jbinary, os.R_OK):
+		run_args = ['java', '-ea', '-cp', source+':' + COMMON + '/java', 'Wrapper']
+	else:
+		print("Could not launch " + source)
 
-def run(source, args, logfile = None):
-    cbinary = source + "/alloc"
-    if os.access(cbinary, os.R_OK):
-        # Got binary
-        run_args = [cbinary]
-    else:
-        print("Could not launch " + source)
-
-    return SubmitRun(run_args + args, logfile = logfile)
+	return SubmitRun(run_args + args)
 
 
 class TestJob:
-    def __init__(self, submit, testfn, **params):
-        self.params = params
-        self.submit = submit
-        self.testfn = testfn
-        self.__result = None
+	def __init__(self, submit, testfn, **params):
+		self.params = params
+		self.submit = submit
+		self.testfn = testfn
+		self.__result = None
 
-    def run(self):
-        # Extract task-dependent params
-        logfile_name = "log_" + str(self.params['msize']) + "_" + self.testfn.__name__
-        logfile = open(os.path.join(SUBMITS, self.submit, logfile_name), "w+")
+	def run(self):
+		# Extract task-dependent params
+		submit_run = run(SUBMITS + self.submit, [str(self.params['msize'])])
+		assert submit_run is not None
 
-        submit_run = run(SUBMITS + self.submit, [str(self.params['msize'])],
-                logfile = logfile)
-        assert submit_run is not None
+		msg = ""
+		ret = -1
+		try:
+			ret = self.testfn(submit_run, self.params['msize'])
+		except RuntimeError as e:
+			# traceback.print_exc()
+			msg = "WRONG: %s" % str(e)
+		except ValueError as e:
+			msg = "Protocol error: %s" % str(e)
+			self.__result = (ret, msg)
+			return
 
-        msg = ""
-        ret = -1
+		submit_run.end()
 
-        # HERE starts a job run
-        try:
-            ret = self.testfn(submit_run, self.params['msize'])
-        except RuntimeError as e:
-            msg = "FAIL: %s" % str(e)
-            pass
-        submit_run.end()
-        # HERE ends a job run
 
-        if ret >= 0:
-            msg = "OK: " + str(ret)
-        self.__result = (ret, msg)
+		if ret >= 0:
+			msg = "OK: " + str(ret)
+		self.__result = (ret, msg)
 
-        logfile.write(msg)
-        if logfile is not None: logfile.close()
+	def is_ok(self):
+		if self.__result is None: return None
 
-    def is_ok(self):
-        if self.__result is None: return None
+		if self.__result[0] >= 0:
+			return True
+		return False
 
-        if self.__result[0] >= 0:
-            return True
-        return False
+	def message(self):
+		if self.__result is None: return None
 
-    def message(self):
-        if self.__result is None: return None
+		return self.__result[1]
 
-        return self.__result[1]
+	def get_result(self):
+		return self.__result
 
-    def get_result(self):
-        return self.__result
-
-    def __str__(self):
-        return "%s\t%8d\t%-40s" % (self.submit, self.params['msize'],
-                self.testfn.__name__)
+	def __str__(self):
+		return "%s\t%8d\t%-40s" % (self.submit, self.params['msize'],
+				self.testfn.__name__)
 
 
 class TestRunner:
-    def __init__(self, test_list, num_threads):
-        self.test_list = test_list
-        self.num_threads = num_threads
-        self.queue = test_list[:]
-        self.queue_lock = threading.Lock()
-        self.console_lock = threading.Lock()
+	def __init__(self, test_list, num_threads):
+		self.test_list = test_list
+		self.num_threads = num_threads
+		self.queue = test_list[:]
+		self.queue_lock = threading.Lock()
+		self.console_lock = threading.Lock()
 
-    def job_start(self, test):
-        with self.console_lock:
-            print("%s: START" % str(test))
+	def job_start(self, test):
+		with self.console_lock:
+			print("%s: START" % str(test))
 
-    def job_finish(self, test):
-        if test.is_ok(): color = 'green'
-        else: color = 'red'
+	def job_finish(self, test):
+		if test.is_ok(): color = 'green'
+		else: color = 'red'
 
-        msg = colored(test.message(), color)
+		msg = colored(test.message(), color)
 
-        with self.console_lock:
-            print("%s: %s" % (str(test), msg))
+		with self.console_lock:
+			print("%s: %s" % (str(test), msg))
 
-    def queue_runner(self):
-        while True:
-            with self.queue_lock:
-                if len(self.queue) == 0:
-                    break
-                test = self.queue.pop(0)
+	def queue_runner(self):
+		while True:
+			with self.queue_lock:
+				if len(self.queue) == 0:
+					break
+				test = self.queue.pop(0)
 
-            self.job_start(test)
-            test.run()
-            self.job_finish(test)
+			self.job_start(test)
+			test.run()
 
-    def run(self):
-        threads = []
-        for i in range(0, self.num_threads):
-            thread = threading.Thread(target = self.queue_runner, daemon=True)
-            thread.start()
-            threads.append(thread)
+			self.job_finish(test)
 
-        for thread in threads:
-            try:
-                thread.join()
-            except KeyboardInterrupt:
-                pass
+	def run(self):
+		threads = []
+		for i in range(0, self.num_threads):
+			thread = threading.Thread(target = self.queue_runner)
+			thread.start()
+			threads.append(thread)
+
+		for thread in threads:
+			thread.join()
 
 
 # Load tests
 
 tests_module = __import__("tests")
 tests = list(map(lambda x: getattr(tests_module, x), filter(lambda x: x.startswith("test_"),
-    dir(tests_module))))
+	dir(tests_module))))
 
-#memsizes = [1000, 2323, 3678
-memsizes = [2048, 5000, 11247, 70000 # 2**17 + 47
-        ]
+
+memsizes = [32768]
+#memsizes = [32768, 2**17, 2**19, 2**21 ]
 mem_results = {}
 
 if len(sys.argv) > 1:
-    all_submits = sys.argv[1:]
+	all_submits = sys.argv[1:]
 else:
-    all_submits = os.listdir(SUBMITS)
+	all_submits = os.listdir(SUBMITS)
 
 sys.stdout.write("Compiling... ")
 for source in all_submits:
-    sys.stdout.write(source + ", ")
-    sys.stdout.flush()
-    compile(SUBMITS + source)
+	sys.stdout.write(source + ", ")
+	sys.stdout.flush()
+	compile(SUBMITS + source)
 print("ALL DONE")
 
 jobs = []
 for submit in all_submits:
-    for msize in memsizes:
-        for test in tests:
-            jobs.append(TestJob(submit, test, msize = msize))
+	for msize in memsizes:
+		for test in tests:
+			jobs.append(TestJob(submit, test, msize = msize))
 
-NUM_THREADS = 1
-TestRunner(jobs, NUM_THREADS).run()
+TestRunner(jobs, 1).run()
 
 all_results = {}
 for job in jobs:
-    msize = job.params['msize']
-    submit = job.submit
+	msize = job.params['msize']
+	submit = job.submit
 
-    mem_results.setdefault(msize, {})
-    mem_results[msize].setdefault(submit,[None] * len(tests))
+	mem_results.setdefault(msize, {})
+	mem_results[msize].setdefault(submit,[None] * len(tests))
 
-    mem_results[msize][submit][tests.index(job.testfn)] = job.get_result()
+	mem_results[msize][submit][tests.index(job.testfn)] = job.get_result()
 
 #for source in all_submits:
-#    for msize in memsizes:
-#        print("Memory size %d" % msize)
-#        mem_results.setdefault(msize, {})
-#        mem_results[msize].setdefault(source, [])
-#        for test in tests:
-#            clean(SUBMITS + source)
-#            s = run(SUBMITS + source, [str(msize)])
-#            sys.stdout.write("  %-40s" % str(test.__name__))
-#            sys.stdout.flush()
-#            res = -1
-#            message = "OK"
-#            try:
-#                res = test(s, msize)
-#            except RuntimeError as e:
-#                message = "FAIL: %s" % str(e)
+#	for msize in memsizes:
+#		print("Memory size %d" % msize)
+#		mem_results.setdefault(msize, {})
+#		mem_results[msize].setdefault(source, [])
+#		for test in tests:
+#			clean(SUBMITS + source)
+#			s = run(SUBMITS + source, [str(msize)])
+#			sys.stdout.write("  %-40s" % str(test.__name__))
+#			sys.stdout.flush()
+#			res = -1
+#			message = "OK"
+#			try:
+#				res = test(s, msize)
+#			except RuntimeError as e:
+#				message = "FAIL: %s" % str(e)
 #
-#            if res >= 0:
-#                message = "OK: %d" % res
-#                color = 'green'
-#            else:
-#                color = 'red'
+#			if res >= 0:
+#				message = "OK: %d" % res
+#				color = 'green'
+#			else:
+#				color = 'red'
 #
-#            mem_results[msize][source].append((res, message))
-#            print(colored(message,color))
+#			mem_results[msize][source].append((res, message))
+#			print(colored(message,color))
 
 # Format HTML output
 
@@ -344,59 +389,61 @@ html = open("results2.html", "w+")
 html.write("<html>")
 html.write("""
 <head>
-    <style type="text/css">
-        .out { overflow: hidden; height: 1em; }
-        .out:hover { overflow: none; height: auto; border: 1px solid;
-        background-color: white; position: absolute; font-family: monospace; }
-        td {overflow: visible; vertical-align: top; width: 20em; }
-        table {table-layout: fixed; }
+	<style type="text/css">
+		.out { overflow: hidden; height: 1em; }
+		.out:hover { overflow: none; height: auto; border: 1px solid;
+		background-color: white; position: absolute; font-family: monospace; }
+		td {overflow: visible; vertical-align: top; width: 20em; }
+		table {table-layout: fixed; }
     </style>
 </head>
 """)
 html.write("<body>")
 
 for msize in mem_results.keys():
-    results = mem_results[msize]
-    submits = list(results.keys())
-    submits.sort()
+	results = mem_results[msize]
+	submits = list(results.keys())
+	submits.sort()
 
-    html.write("<h2>%d bytes</h2>" % msize)
-    html.write("<table border=\"2\">\n")
+	html.write("<h2>%d bytes</h2>" % msize)
+	html.write("<table border=\"2\">\n")
 
-    # Calculate maximums across tests
-    test_max = [0]*len(tests)
-    for test in range(0,len(tests)):
-        test_max[test] = 0
-        for submit in submits:
-            result = results[submit][test]
-            if result:
-                test_max[test] = max (test_max[test], result[0])
+	# Calculate maximums across tests
+	test_min = [0]*len(tests)
+	for test in range(0,len(tests)):
+		test_min[test] = 9999999999999
+		for submit in submits:
+			if results[submit][test] is None:
+				print("Job did not run: %s, %s" % (submit, test))
+				continue
+			if results[submit][test][0] < 0:
+				continue
+			test_min[test] = min (test_min[test], results[submit][test][0])
 
-    # Test header
-    html.write("<thead><tr><td>User</td>")
-    for test in tests:
-        html.write("<td>%s</td>"% test.__name__[5:])
-    html.write("</tr></thead>\n")
+	# Test header
+	html.write("<thead><tr><td>User</td>")
+	for test in tests:
+		html.write("<td>%s</td>"% test.__name__[5:])
+	html.write("</tr></thead>\n")
 
-    for submit in submits:
-        html.write("<tr><td>%s</td>" % submit);
-        for test in range(0,len(results[submit])):
-            item = results[submit][test]
-            if item:
-                item0, item1 = item[0], item[1]
-            else:
-                item0, item1 = -1, "TIMEOUT/unknown error"
-            if item0 == -1:
-                sty = "background-color: red"
-            else:
-                if test_max[test] == item0:
-                    sty = "background-color: lightgreen"
-                else:
-                    sty = "background-color: green"
-            html.write("<td style=\"%s\"><div class=\"out\">%s</div></td>" %
-                    (sty, escape(item1).replace("\n","<br/>\n")))
-        html.write("</tr>\n")
-    html.write("</table>")
+	for submit in submits:
+		html.write("<tr><td>%s</td>" % submit);
+		for test in range(0,len(results[submit])):
+			item = results[submit][test]
+			if item is None:
+				html.write("<td>Test did not run</td>")
+				continue
+			if item[0] == -1:
+				sty = "background-color: red"
+			else:
+				if test_min[test] == item[0]:
+					sty = "background-color: lightgreen"
+				else:
+					sty = "background-color: green"
+			html.write("<td style=\"%s\"><div class=\"out\">%s</div></td>" %
+					(sty, escape(item[1]).replace("\n","<br/>\n")))
+		html.write("</tr>\n")
+	html.write("</table>")
 
 html.write("Generated: %s</body></html>\n" % datetime.datetime.now().ctime())
 html.close()
@@ -404,5 +451,6 @@ html.close()
 os.system('cp results2.html logs/results-`date -Iseconds`.html')
 
 #if len(sys.argv) == 1:
-    #os.system('scp results.html mino@ksp.sk:public_html/os/du2/')
-    #os.system('scp results.html mino@ksp.sk:public_html/os/du2/results-`date -Iseconds`.html')
+    #os.system('scp results2.html mino@ksp.sk:public_html/os/du2/')
+    #os.system('scp results2.html mino@ksp.sk:public_html/os/du2/results-`date -Iseconds`.html')
+

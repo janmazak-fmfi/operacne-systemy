@@ -1,4 +1,4 @@
-   2. Domaca uloha z OS
+   1. Domaca uloha z OS
    ====================
 
 
