@@ -153,6 +153,6 @@ s adresármi, nie iba funkcie, ktoré sú v L3 navyše.
 
 Programy sa odovzdávajú e-mailom na adresu `jan.mazak@fmph.uniba.sk`, predmet `OS-DU2`, súbor `filesystem.c` priložte k e-mailu. Odovzdať je možné viackrát (najviac raz denne).
 
-Najneskorší možný termín odovzdania je **18. 5. 2026**. Nepodceňujte čas potrebný na túto DÚ, ani celý deň nemusí stačiť.
+Najneskorší možný termín odovzdania je **25. 5. 2026**. Nepodceňujte čas potrebný na túto DÚ, ani celý deň nemusí stačiť.
 
 Oficiálny výstup z testovača bude zverejnený po odovzdaní všetkých domácich úloh na http://dcs.fmph.uniba.sk/~mazak/vyucba/os/results2.html.
